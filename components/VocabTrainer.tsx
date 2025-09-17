@@ -1,12 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Word, Language, PreloadedWord } from '../types';
-import { MAX_WORDS_PER_ROUND } from '../constants';
-import { generateVocabImage } from '../services/geminiService';
-import SparkleIcon from './icons/SparkleIcon';
+import React, { useState, useEffect } from 'react';
+import { Word, PreloadedWord, Language } from '../types';
+import SpeakerIcon from './icons/SpeakerIcon';
+import SpeakerOffIcon from './icons/SpeakerOffIcon';
 import BadgeIcon from './icons/BadgeIcon';
-
-// @ts-ignore
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 interface VocabTrainerProps {
   onComplete: (words: Word[]) => void;
@@ -15,291 +11,136 @@ interface VocabTrainerProps {
   initialData: PreloadedWord[];
   fullWordList: Word[];
   isImageGenerationEnabled: boolean;
-  speak: (text: string) => void;
+  speak: (text: string, lang?: Language) => void;
   stopSpeech: () => void;
   isSpeaking: boolean;
 }
 
-const VocabTrainer: React.FC<VocabTrainerProps> = ({ onComplete, round, language, initialData, fullWordList, isImageGenerationEnabled, speak, stopSpeech, isSpeaking }) => {
-  const [wordData, setWordData] = useState<PreloadedWord[]>([]);
-  const [nextAvailableWordIndex, setNextAvailableWordIndex] = useState(MAX_WORDS_PER_ROUND);
-  const [currentWordIndex, setCurrentWordIndex] = useState(0);
-  const [collectedWords, setCollectedWords] = useState<Word[]>([]);
-  const [isListening, setIsListening] = useState(false);
-  const [feedbackText, setFeedbackText] = useState('เตรียมตัวให้พร้อม!');
-  const [transcript, setTranscript] = useState('');
-  const [countdown, setCountdown] = useState(10);
-  const [isImageLoading, setIsImageLoading] = useState(true); // Start as true
-  const [isAwaitingFeedback, setIsAwaitingFeedback] = useState(false);
-  const [incorrectAttempts, setIncorrectAttempts] = useState(0);
-  
-  const recognitionRef = useRef(SpeechRecognition ? new SpeechRecognition() : null);
-  const countdownInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  const feedbackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isProcessing = useRef(false);
-
-  const currentWordDataItem = wordData[currentWordIndex];
-  const currentWord = currentWordDataItem?.word;
+const VocabTrainer: React.FC<VocabTrainerProps> = ({
+  onComplete,
+  round,
+  initialData,
+  speak,
+  stopSpeech,
+  isSpeaking,
+}) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [showEnglish, setShowEnglish] = useState(false);
+  const [words, setWords] = useState<Word[]>([]);
 
   useEffect(() => {
-    const recognition = recognitionRef.current;
-    if (recognition) {
-        recognition.continuous = true;
-        recognition.lang = language;
-        recognition.interimResults = true;
-    }
-    setWordData(initialData);
-    setNextAvailableWordIndex(MAX_WORDS_PER_ROUND);
-    setCurrentWordIndex(0);
-    setCollectedWords([]);
-    setFeedbackText('เตรียมตัวให้พร้อม!');
-    setTranscript('');
-    setIncorrectAttempts(0);
-    setIsImageLoading(initialData.length === 0);
-  }, [initialData, language]);
-  
-  // Effect to manage image loading state based on word data
+    // Extract words from initialData to pass to onComplete later
+    setWords(initialData.map(item => item.word));
+  }, [initialData]);
+
+  // Automatically speak the new word when it appears
   useEffect(() => {
-    if (currentWordDataItem?.imageUrl) {
-      setIsImageLoading(false);
+    if (initialData.length > 0 && initialData[currentIndex]) {
+      speak(initialData[currentIndex].word.thai, Language.TH);
     }
-  }, [currentWordDataItem]);
-  
-  const cleanupListeners = useCallback(() => {
-    const recognition = recognitionRef.current;
-    if (recognition) {
-      recognition.onresult = null;
-      recognition.onerror = null;
-      recognition.onend = null;
-    }
-    if (countdownInterval.current) clearInterval(countdownInterval.current);
-    if (feedbackTimeout.current) clearTimeout(feedbackTimeout.current);
-  }, []);
+    // Cleanup speech when component unmounts or word changes
+    return () => {
+      stopSpeech();
+    };
+  }, [currentIndex, initialData, speak, stopSpeech]);
 
-  useEffect(() => {
-    return cleanupListeners;
-  }, [cleanupListeners]);
 
-  const handleCorrectAnswer = useCallback(() => {
-      if (!currentWord) return;
-      const feedback = language === Language.EN ? 'Great job!' : 'เก่งมาก!';
-      setFeedbackText(feedback);
-      speak(feedback);
-      const newCollected = [...collectedWords, currentWord];
-      setCollectedWords(newCollected);
-
-      feedbackTimeout.current = setTimeout(() => {
-        if (newCollected.length === MAX_WORDS_PER_ROUND) {
-          onComplete(newCollected);
-        } else {
-          setCurrentWordIndex(prev => prev + 1);
-          setIncorrectAttempts(0); // Reset for next word
-          setFeedbackText(language === Language.EN ? 'Next word!' : 'คำต่อไป!');
-          setTranscript('');
-          setIsImageLoading(true); // Set loading for next image
-        }
-        setIsAwaitingFeedback(false);
-      }, 1000);
-  }, [collectedWords, currentWord, onComplete, language, speak]);
-
-  const handleIncorrectAnswer = useCallback(() => {
-      setIncorrectAttempts(prev => prev + 1);
-      const feedback = language === Language.EN ? 'Try again!' : 'ลองอีกครั้งนะ!';
-      setFeedbackText(feedback);
-      speak(feedback);
-      feedbackTimeout.current = setTimeout(() => {
-        setFeedbackText(language === Language.EN ? 'Lets try that word again' : 'ลองพูดอีกครั้งนะ');
-        setTranscript('');
-        setIsAwaitingFeedback(false);
-      }, 1000);
-  }, [language, speak]);
-
-  const processSpeech = useCallback((finalTranscript: string) => {
-    if (!currentWord) return;
-    const spoken = finalTranscript.toLowerCase().trim();
-    
-    // Check against both Thai and English versions for flexibility with loanwords
-    const targetEnglish = currentWord.english.toLowerCase().trim();
-    const targetThai = currentWord.thai.toLowerCase().trim();
-
-    if (spoken.includes(targetThai) || spoken.includes(targetEnglish)) {
-      handleCorrectAnswer();
+  const handleNext = () => {
+    setShowEnglish(false); // Hide English for the next card
+    if (currentIndex < initialData.length - 1) {
+      setCurrentIndex(currentIndex + 1);
     } else {
-      handleIncorrectAnswer();
+      onComplete(words);
     }
-  }, [currentWord, handleCorrectAnswer, handleIncorrectAnswer]);
-
-  const startListening = () => {
-    const recognition = recognitionRef.current;
-    if (!recognition || isListening || isAwaitingFeedback || isImageLoading || isSpeaking) return;
-    
-    stopSpeech();
-    cleanupListeners();
-    isProcessing.current = false;
-    setTranscript('');
-    setIsListening(true);
-    setCountdown(10);
-    recognition.lang = language; // Ensure lang is set before starting
-    recognition.start();
-
-    countdownInterval.current = setInterval(() => {
-        setCountdown(prev => prev - 1);
-    }, 1000);
-
-    recognition.onresult = (event: any) => {
-      let final = '';
-      let interim = '';
-      for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript;
-        } else {
-          interim += event.results[i][0].transcript;
-        }
-      }
-      setTranscript(final || interim);
-      
-      if (final && !isProcessing.current) {
-        isProcessing.current = true;
-        recognition.stop();
-        setIsAwaitingFeedback(true);
-        feedbackTimeout.current = setTimeout(() => processSpeech(final), 1000);
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error', event.error);
-      if (event.error === 'no-speech') {
-        setFeedbackText('ไม่ได้ยินเสียง ลองพูดอีกครั้งนะคะ');
-      } else {
-        setFeedbackText('เกิดข้อผิดพลาดในการฟังเสียง');
-      }
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      if (countdownInterval.current) clearInterval(countdownInterval.current);
-      if (!isProcessing.current) {
-          isProcessing.current = true;
-          setTranscript(prev => {
-              if (prev) { // Only process if there is a transcript
-                setIsAwaitingFeedback(true);
-                feedbackTimeout.current = setTimeout(() => processSpeech(prev), 1000);
-              } else {
-                handleIncorrectAnswer(); // If nothing was said
-              }
-              return prev;
-          });
-      }
-    };
-  };
-
-  useEffect(() => {
-    const recognition = recognitionRef.current;
-    if (countdown === 0 && isListening) {
-      recognition?.stop();
-    }
-  }, [countdown, isListening, handleIncorrectAnswer]);
-  
-  const handleListenSound = () => {
-    if (!currentWord || isSpeaking) return;
-    const wordToSpeak = language === Language.EN ? currentWord.english : currentWord.thai;
-    speak(wordToSpeak);
   };
   
-  const handleSkipWord = async () => {
-      if (isAwaitingFeedback || isListening || isImageLoading || nextAvailableWordIndex >= fullWordList.length || incorrectAttempts < 3) {
-        return;
-      }
+  const handleCardClick = () => {
+      setShowEnglish(prev => !prev);
+  }
 
-      setIsImageLoading(true);
-      setFeedbackText('กำลังหาคำศัพท์ใหม่...');
-      
-      const newWord = fullWordList[nextAvailableWordIndex];
-      const newImageUrl = isImageGenerationEnabled 
-        ? await generateVocabImage(newWord.english)
-        : `https://loremflickr.com/400/300/${newWord.english},illustration,simple?lock=${newWord.english.replace(/\s/g, '')}`;
-
-
-      const newWordData = [...wordData];
-      newWordData[currentWordIndex] = { word: newWord, imageUrl: newImageUrl };
-      
-      setWordData(newWordData);
-      setNextAvailableWordIndex(prev => prev + 1);
-      setTranscript('');
-      setIncorrectAttempts(0); // Reset for new word
-      setFeedbackText('นี่คือคำศัพท์ใหม่!');
-      // setIsImageLoading will be set to false by the useEffect watching currentWordDataItem
+  const handleSpeak = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card flip when clicking speaker
+    if (isSpeaking) {
+      stopSpeech();
+    } else if (initialData[currentIndex]) {
+      speak(initialData[currentIndex].word.thai, Language.TH);
+    }
   };
 
-  const targetLangWord = currentWord ? (language === Language.EN ? currentWord.english : currentWord.thai) : '';
-  const translationWord = currentWord ? (language === Language.EN ? currentWord.thai : currentWord.english) : '';
-  const areButtonsDisabled = isListening || isAwaitingFeedback || isImageLoading || !currentWord || isSpeaking;
-  const canSkip = incorrectAttempts >= 3;
+  if (initialData.length === 0) {
+    return (
+        <div className="w-full h-full flex items-center justify-center bg-gray-100">
+            <p className="text-xl text-gray-600">กำลังเตรียมคำศัพท์...</p>
+        </div>
+    );
+  }
+
+  const currentWord = initialData[currentIndex];
+  if (!currentWord) {
+      // This can happen briefly if initialData is being set.
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-gray-100">
+            <p className="text-xl text-gray-600">กำลังโหลด...</p>
+        </div>
+    );
+  }
+
+  const progressPercentage = ((currentIndex + 1) / initialData.length) * 100;
+  const isLastCard = currentIndex === initialData.length - 1;
 
   return (
-    <div className="w-full h-full flex flex-col p-4 sm:p-6 overflow-hidden">
-      <header className="flex-shrink-0 flex justify-between items-center mb-2">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-purple-700">ฝึกคำศัพท์กับ AI</h1>
-          <p className="text-sm md:text-base text-gray-600">สะสม {MAX_WORDS_PER_ROUND} คำ เพื่อสร้างนิทานของคุณ!</p>
-        </div>
-        <div className="flex items-center space-x-2">
-          {Array.from({ length: round - 1 }).map((_, i) => <div key={i} className="text-yellow-500"><BadgeIcon /></div>)}
-        </div>
-      </header>
+    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-blue-100 via-indigo-100 to-purple-100 p-4 sm:p-8 overflow-hidden">
+      <div className="w-full max-w-lg mx-auto flex flex-col gap-6">
+        {/* Header */}
+        <header className="text-center animate-[bounce-in_0.5s_ease-out]">
+            <div className="inline-flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-md">
+                <BadgeIcon />
+                <h1 className="text-2xl font-bold text-purple-700">
+                    เรียนรู้คำศัพท์รอบที่ {round}
+                </h1>
+            </div>
+        </header>
 
-      <div className="w-full bg-gray-200 rounded-full h-3 sm:h-4 mb-3 sm:mb-4 flex-shrink-0">
-        <div className="bg-green-400 h-full rounded-full transition-all duration-500" style={{ width: `${(collectedWords.length / MAX_WORDS_PER_ROUND) * 100}%` }}></div>
-      </div>
-      
-      <div className="flex-1 flex flex-col items-center justify-center bg-purple-50 rounded-2xl p-4 text-center min-h-0">
-        {currentWord ? (
-          <div className="w-full h-full flex flex-col md:grid md:grid-cols-2 md:gap-x-8 items-center">
-            {/* --- Image Column (Left on Desktop) --- */}
-            <div className="w-full max-w-sm md:max-w-none mx-auto h-40 md:h-full bg-white rounded-lg shadow-inner overflow-hidden flex items-center justify-center mb-3 md:mb-0">
-              {isImageLoading ? (
-                <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-purple-500" role="status" aria-label="Loading image"></div>
-              ) : (
-                <img src={currentWordDataItem?.imageUrl} alt={currentWord.english} className="w-full h-full object-contain" onLoad={() => setIsImageLoading(false)} />
-              )}
+        {/* Card */}
+        <div className="relative w-full aspect-[4/3] cursor-pointer group" onClick={handleCardClick} style={{ perspective: '1000px' }}>
+             <div 
+                className={`relative w-full h-full rounded-2xl shadow-2xl transition-transform duration-700 ease-in-out`}
+                style={{ transformStyle: 'preserve-3d', transform: showEnglish ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
+             >
+                {/* Front of Card */}
+                <div className="absolute w-full h-full bg-white rounded-2xl overflow-hidden flex flex-col items-center justify-center p-4" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
+                    <img src={currentWord.imageUrl} alt={currentWord.word.english} className="w-full h-full object-contain" />
+                    <div className="absolute bottom-0 w-full bg-black/50 backdrop-blur-sm p-4 rounded-b-2xl">
+                         <p className="text-4xl font-bold text-white text-center">{currentWord.word.thai}</p>
+                    </div>
+                    <button onClick={handleSpeak} className="absolute top-4 right-4 p-3 bg-white/70 backdrop-blur-sm rounded-full text-purple-600 hover:bg-white transition-colors">
+                        {isSpeaking ? <SpeakerOffIcon /> : <SpeakerIcon />}
+                    </button>
+                </div>
+                {/* Back of Card */}
+                 <div className="absolute w-full h-full bg-purple-600 rounded-2xl overflow-hidden flex flex-col items-center justify-center p-4" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                    <p className="text-5xl font-bold text-white text-center">{currentWord.word.english}</p>
+                </div>
+             </div>
+        </div>
+
+        {/* Progress and Actions */}
+        <footer className="w-full flex flex-col items-center gap-4 animate-[bounce-in_0.5s_ease-out_0.2s] opacity-0" style={{ animationFillMode: 'forwards' }}>
+             {/* Progress Bar */}
+             <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
+                <div 
+                    className="bg-gradient-to-r from-yellow-400 to-orange-500 h-4 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${progressPercentage}%` }}
+                />
             </div>
 
-            {/* --- Controls Column (Right on Desktop) --- */}
-            <div className="flex flex-col items-center justify-center md:items-start md:text-left h-full w-full">
-              <div className="mb-2">
-                <p className="text-4xl sm:text-5xl font-bold text-purple-800 break-words">{targetLangWord}</p>
-                <p className="text-xl sm:text-2xl text-gray-500">({translationWord})</p>
-              </div>
-
-              <div className="h-10 text-xl font-semibold text-blue-600 mb-2 md:h-12 md:text-2xl truncate w-full">{transcript}</div>
-
-              <div className="flex flex-wrap justify-center md:justify-start gap-2 sm:gap-3 mb-2">
-                <button onClick={handleListenSound} disabled={areButtonsDisabled} className="px-4 py-2 bg-blue-500 text-white font-bold rounded-lg shadow-md hover:bg-blue-600 disabled:bg-gray-400 text-sm sm:text-base">ฟังเสียง</button>
-                <button onClick={startListening} disabled={areButtonsDisabled || !recognitionRef.current} className="px-4 py-2 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 disabled:bg-gray-400 text-sm sm:text-base">
-                  {isListening ? `ฟังอยู่... ${countdown}` : "พูดเลย"}
-                </button>
-                <button onClick={handleSkipWord} disabled={areButtonsDisabled || nextAvailableWordIndex >= fullWordList.length || !canSkip} className="px-4 py-2 bg-orange-400 text-white font-bold rounded-lg shadow-md hover:bg-orange-500 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm sm:text-base">
-                  {canSkip ? 'เปลี่ยนคำ' : `ลองอีก ${3 - incorrectAttempts} ครั้ง`}
-                </button>
-              </div>
-
-              <p className="text-base sm:text-lg h-7 font-semibold text-purple-700">{feedbackText}</p>
-            </div>
-          </div>
-        ) : (
-          <p className="text-2xl text-gray-500">กำลังโหลดคำศัพท์...</p>
-        )}
-      </div>
-
-      <div className="flex-shrink-0 mt-3 sm:mt-4">
-        <h3 className="text-base font-semibold mb-2 text-purple-700">คลังคำศัพท์วิเศษ</h3>
-        <div className="flex space-x-2 sm:space-x-4 h-10 sm:h-12 items-center">
-          {Array.from({ length: MAX_WORDS_PER_ROUND }).map((_, i) => (
-            <div key={i} className={`flex-1 h-full rounded-full flex items-center justify-center text-yellow-400 transition-all duration-500 ${collectedWords[i] ? 'bg-purple-500 scale-110' : 'bg-gray-200'}`}>
-              {collectedWords[i] && <SparkleIcon />}
-            </div>
-          ))}
-        </div>
+            <button
+                onClick={handleNext}
+                className="w-full px-8 py-4 font-['Lilita_One'] text-white text-3xl rounded-2xl shadow-lg transform transition-all duration-200 ease-in-out border-b-8 active:border-b-2 active:translate-y-1 bg-gradient-to-b from-green-500 to-teal-600 border-green-700 hover:from-green-400 hover:to-teal-500"
+                >
+                {isLastCard ? 'ไปแต่งนิทานกัน!' : 'คำต่อไป'}
+            </button>
+        </footer>
       </div>
     </div>
   );

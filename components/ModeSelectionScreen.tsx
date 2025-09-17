@@ -3,17 +3,23 @@ import { Language, WordCategory } from '../types';
 import { WORD_CATEGORY_THAI } from '../constants';
 
 interface ModeSelectionScreenProps {
-  onStart: (language: Language, category: WordCategory) => void;
+  onStart: (category: WordCategory) => void;
   onSkipToStory: () => void;
   isDebugMode: boolean;
+  speak: (text: string, lang?: Language) => void;
 }
 
-const ModeSelectionScreen: React.FC<ModeSelectionScreenProps> = ({ onStart, onSkipToStory, isDebugMode }) => {
-  const [selectedLanguage, setSelectedLanguage] = useState<Language>(Language.TH);
+const ModeSelectionScreen: React.FC<ModeSelectionScreenProps> = ({ onStart, onSkipToStory, isDebugMode, speak }) => {
   const [selectedCategory, setSelectedCategory] = useState<WordCategory | null>(null);
 
   const categories = Object.values(WordCategory);
   const isStartDisabled = selectedCategory === null;
+
+  const handleCategorySelect = (category: WordCategory) => {
+    setSelectedCategory(category);
+    speak(WORD_CATEGORY_THAI[category], Language.TH);
+  };
+
 
   return (
     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-50 via-rose-50 to-amber-50 p-4">
@@ -22,33 +28,14 @@ const ModeSelectionScreen: React.FC<ModeSelectionScreenProps> = ({ onStart, onSk
           <h1 className="text-3xl sm:text-4xl font-bold text-purple-800">เลือกการผจญภัยของคุณ!</h1>
         </header>
 
-        {/* Language Selection */}
-        <section>
-          <h2 className="text-xl font-semibold text-gray-700 mb-3 text-center sm:text-left">1. เลือกภาษาที่จะฝึก</h2>
-          <div className="flex bg-gray-200 rounded-full p-1">
-            <button
-              onClick={() => setSelectedLanguage(Language.TH)}
-              className={`w-1/2 p-2 rounded-full font-bold transition-colors duration-300 ${selectedLanguage === Language.TH ? 'bg-purple-600 text-white shadow-md' : 'text-gray-600'}`}
-            >
-              ภาษาไทย
-            </button>
-            <button
-              onClick={() => setSelectedLanguage(Language.EN)}
-              className={`w-1/2 p-2 rounded-full font-bold transition-colors duration-300 ${selectedLanguage === Language.EN ? 'bg-white text-purple-600 shadow-md' : 'text-gray-600'}`}
-            >
-              English
-            </button>
-          </div>
-        </section>
-
         {/* Category Selection */}
         <section>
-          <h2 className="text-xl font-semibold text-gray-700 mb-3 text-center sm:text-left">2. เลือกหมวดหมู่คำศัพท์</h2>
+          <h2 className="text-xl font-semibold text-gray-700 mb-3 text-center">เลือกหมวดหมู่คำศัพท์</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
             {categories.map((category) => (
               <button
                 key={category}
-                onClick={() => setSelectedCategory(category)}
+                onClick={() => handleCategorySelect(category)}
                 className={`p-3 rounded-xl text-center font-semibold transition-all duration-200 border-2 ${
                   selectedCategory === category
                     ? 'bg-yellow-400 border-yellow-500 text-yellow-900 shadow-lg scale-105'
@@ -62,9 +49,9 @@ const ModeSelectionScreen: React.FC<ModeSelectionScreenProps> = ({ onStart, onSk
         </section>
 
         {/* Action Buttons */}
-        <footer className="flex flex-col items-center space-y-3">
+        <footer className="flex flex-col items-center space-y-3 pt-4">
           <button
-            onClick={() => selectedCategory && onStart(selectedLanguage, selectedCategory)}
+            onClick={() => selectedCategory && onStart(selectedCategory)}
             disabled={isStartDisabled}
             className="w-full px-8 py-4 bg-green-500 text-white text-2xl font-bold rounded-2xl shadow-lg transition-all duration-300 ease-in-out border-b-4 border-green-700 hover:bg-green-600 active:border-b-2 active:translate-y-1 disabled:bg-gray-300 disabled:border-gray-400 disabled:cursor-not-allowed"
           >
