@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Word, StoryScene, Language, StoryTone } from '../types';
-import { generateInitialStoryScene, generateNextStoryScene, generateFinalStoryScene, generateStoryTitle } from '../services/geminiService';
-import { STORY_FOLLOW_UP_QUESTIONS_TH, STORY_FOLLOW_UP_QUESTIONS_EN } from '../constants';
-import MicrophoneIcon from './icons/MicrophoneIcon';
-import StopIcon from './icons/StopIcon';
+// Fix: Create the full Storybook component to resolve module errors and implement story generation logic.
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Word, Language, StoryTone, StoryScene } from '../types';
+import {
+  generateInitialStoryScene,
+  generateNextStoryScene,
+  generateFinalStoryScene,
+  generateStoryTitle,
+} from '../services/geminiService';
 import SpeakerIcon from './icons/SpeakerIcon';
 import SpeakerOffIcon from './icons/SpeakerOffIcon';
 import DownloadIcon from './icons/DownloadIcon';
-
-// @ts-ignore
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+import SparkleIcon from './icons/SparkleIcon';
 
 interface StorybookProps {
   words: Word[];
@@ -17,369 +18,202 @@ interface StorybookProps {
   language: Language;
   storyTone: StoryTone;
   isImageGenerationEnabled: boolean;
-  speak: (text: string) => void;
+  speak: (text: string, lang?: Language) => void;
   stopSpeech: () => void;
   isSpeaking: boolean;
 }
 
-const Storybook: React.FC<StorybookProps> = ({ words, onComplete, language, storyTone, isImageGenerationEnabled, speak, stopSpeech, isSpeaking }) => {
+const Storybook: React.FC<StorybookProps> = ({
+  words,
+  onComplete,
+  language,
+  storyTone,
+  isImageGenerationEnabled,
+  speak,
+  stopSpeech,
+  isSpeaking,
+}) => {
   const [scenes, setScenes] = useState<StoryScene[]>([]);
-  const [currentSceneIndex, setCurrentSceneIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [isAwaitingFeedback, setIsAwaitingFeedback] = useState(false);
-  const [displayedText, setDisplayedText] = useState('');
-  const [storyTitle, setStoryTitle] = useState<string | null>(null);
-  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('AI กำลังสร้างสรรค์นิทานเรื่องแรก...');
+  const [isStoryFinished, setIsStoryFinished] = useState(false);
+  const [title, setTitle] = useState('');
+  const storyContainerRef = useRef<HTMLDivElement>(null);
 
-  const recognitionRef = useRef(SpeechRecognition ? new SpeechRecognition() : null);
-  const storySoFar = scenes.map(s => s.text).join(' ');
-  const feedbackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isProcessing = useRef(false);
-  const hasSpokenForScene = useRef<Record<number, boolean>>({});
-  const isMounted = useRef(true);
+  const wordList = words.map(w => language === Language.TH ? w.thai : w.english);
 
   useEffect(() => {
-    isMounted.current = true;
+    const createInitialScene = async () => {
+      try {
+        const initialScene = await generateInitialStoryScene(wordList, language, storyTone, isImageGenerationEnabled);
+        setScenes([initialScene]);
+      } catch (error) {
+        console.error("Failed to generate initial scene:", error);
+        setScenes([{ text: 'เกิดข้อผิดพลาด! ลองใหม่อีกครั้งนะ', imageUrl: '', choices: [] }]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    createInitialScene();
+    
     return () => {
-      isMounted.current = false;
       stopSpeech();
     };
-  }, [stopSpeech]);
+  }, []); // Run only on mount
 
-  useEffect(() => {
-    const recognition = recognitionRef.current;
-    if (recognition) recognition.lang = language;
-  }, [language]);
-  
-  const cleanupListeners = useCallback(() => {
-    const recognition = recognitionRef.current;
-    if (recognition) {
-      recognition.onresult = null;
-      recognition.onerror = null;
-      recognition.onend = null;
-    }
-    if (feedbackTimeout.current) clearTimeout(feedbackTimeout.current);
-  }, []);
-
-  const generateScene = useCallback(async (choice: string | null = null) => {
-    stopSpeech();
-    setIsLoading(true);
-    setIsAwaitingFeedback(false);
-    let newScene: StoryScene;
-    const wordStrings = words.map(w => w.english);
-    
-    if (scenes.length === 0) {
-      newScene = await generateInitialStoryScene(wordStrings, language, storyTone, isImageGenerationEnabled);
-    } else if (scenes.length < 4) {
-      newScene = await generateNextStoryScene(storySoFar, choice || '', language, storyTone, wordStrings, isImageGenerationEnabled, scenes.length);
-    } else {
-      newScene = await generateFinalStoryScene(storySoFar, language, storyTone, wordStrings, isImageGenerationEnabled);
-    }
-
-    if (isMounted.current) {
-        setScenes(prev => [...prev, newScene]);
-        if(scenes.length > 0) setCurrentSceneIndex(prev => prev + 1);
-        setIsLoading(false);
-    }
-  }, [words, scenes, storySoFar, language, storyTone, isImageGenerationEnabled, stopSpeech]);
-  
-  useEffect(() => {
-    if (scenes.length === 0) generateScene();
-    return cleanupListeners;
-  }, [generateScene, cleanupListeners]);
-  
-  // Effect to generate story title when story is complete
-  useEffect(() => {
-    if (scenes.length >= 5 && !storyTitle && !isGeneratingTitle) {
-      const fetchTitle = async () => {
-        setIsGeneratingTitle(true);
-        const fullStory = scenes.map(s => s.text).join(' ');
-        const title = await generateStoryTitle(fullStory, language);
-        if (isMounted.current) {
-          setStoryTitle(title);
-          setIsGeneratingTitle(false);
-        }
-      };
-      fetchTitle();
-    }
-  }, [scenes, language, storyTitle, isGeneratingTitle]);
-
-  const currentScene = scenes[currentSceneIndex];
-
-  const processSpeech = useCallback((finalTranscript: string) => {
-    if (!finalTranscript) return;
-    setIsAwaitingFeedback(true);
-    feedbackTimeout.current = setTimeout(() => generateScene(finalTranscript), 1000);
-  }, [generateScene]);
-
-  const processSpeechRef = useRef(processSpeech);
-  useEffect(() => { processSpeechRef.current = processSpeech; }, [processSpeech]);
+  const currentScene = scenes[scenes.length - 1];
 
   useEffect(() => {
     if (currentScene && !isLoading) {
-      setDisplayedText('');
-      const textToDisplay = currentScene.text || '';
-      if (!textToDisplay) return;
-
-      if (!hasSpokenForScene.current[currentSceneIndex]) {
-        hasSpokenForScene.current[currentSceneIndex] = true;
-        
-        let fullTextToSpeak = textToDisplay;
-        if (currentScene.choices?.length) {
-            const questions = language === Language.TH ? STORY_FOLLOW_UP_QUESTIONS_TH : STORY_FOLLOW_UP_QUESTIONS_EN;
-            const questionText = questions[Math.floor(Math.random() * questions.length)];
-            fullTextToSpeak += ` ${questionText}`;
-        }
-        speak(fullTextToSpeak);
-      }
-
-      let i = 0;
-      const textSpeed = 40; // Faster typing for better UX with real audio
-      const intervalId = setInterval(() => {
-        if (i < textToDisplay.length) {
-          setDisplayedText(textToDisplay.substring(0, i + 1));
-          i++;
-        } else {
-          clearInterval(intervalId);
-        }
-      }, textSpeed);
-
-      return () => clearInterval(intervalId);
+      speak(currentScene.text, language);
     }
-  }, [currentScene, isLoading, currentSceneIndex, language, speak]);
+  }, [currentScene, isLoading, speak, language]);
 
-  const handleSpeakChoice = (choiceText: string) => {
-    speak(choiceText);
+  const handleChoice = async (choice: string) => {
+    if (isLoading) return;
+    setIsLoading(true);
+    stopSpeech();
+    
+    // 3 scenes with choices, then a final scene. Total 4 scenes.
+    if (scenes.length < 3) {
+      setLoadingMessage('AI กำลังแต่งเรื่องราวต่อไป...');
+      const storySoFar = scenes.map(s => s.text).join('\n\n');
+      const nextScene = await generateNextStoryScene(storySoFar, choice, language, storyTone, wordList, isImageGenerationEnabled, scenes.length + 1);
+      setScenes(prev => [...prev, nextScene]);
+      setIsLoading(false);
+    } else {
+      setLoadingMessage('กำลังสร้างตอนจบของนิทาน...');
+      const storySoFar = [...scenes.map(s => s.text), choice].join('\n\n');
+      const finalScene = await generateFinalStoryScene(storySoFar, language, storyTone, wordList, isImageGenerationEnabled);
+      setScenes(prev => [...prev, finalScene]);
+      
+      const fullStory = scenes.map(s => s.text).concat(finalScene.text).join('\n\n');
+      const generatedTitle = await generateStoryTitle(fullStory, language);
+      setTitle(generatedTitle);
+      
+      setIsStoryFinished(true);
+      setIsLoading(false);
+    }
   };
 
-  const handleReplayOrStopAudio = useCallback(() => {
+  const handleDownload = useCallback(async () => {
+    if (!storyContainerRef.current) return;
+    try {
+      const { toPng } = await import('html-to-image');
+      const download = (await import('downloadjs')).default;
+      
+      const dataUrl = await toPng(storyContainerRef.current, {
+        quality: 0.95,
+        backgroundColor: '#f3e8ff',
+        style: {
+          margin: '0',
+          padding: '2rem',
+          fontFamily: "'Mitr', sans-serif"
+        }
+      });
+      download(dataUrl, `${(title || 'imagitale-story').replace(/\s+/g, '-').toLowerCase()}.png`);
+    } catch (e) {
+      console.error('Download failed:', e);
+      alert('ขออภัย, ไม่สามารถดาวน์โหลดเรื่องราวได้ในขณะนี้');
+    }
+  }, [title]);
+
+  const handleSpeakIconClick = (e: React.MouseEvent, text: string) => {
+    e.stopPropagation();
     if (isSpeaking) {
       stopSpeech();
-    } else if (currentScene?.text && displayedText.length >= currentScene.text.length) {
-      speak(currentScene.text);
-    }
-  }, [isSpeaking, currentScene, displayedText, speak, stopSpeech]);
-  
-  const stopListening = useCallback(() => {
-    const recognition = recognitionRef.current;
-    if (recognition && isListening) recognition.stop();
-  }, [isListening]);
-  
-  const startListening = () => {
-    const recognition = recognitionRef.current;
-    if (!recognition || isListening || isAwaitingFeedback || isLoading || isSpeaking) return;
-    
-    stopSpeech();
-    cleanupListeners();
-    isProcessing.current = false;
-    setTranscript('');
-    setIsListening(true);
-    
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.start();
-
-    recognition.onresult = (event: any) => {
-      let final = ''; let interim = '';
-      for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) final += event.results[i][0].transcript;
-        else interim += event.results[i][0].transcript;
-      }
-      setTranscript(final || interim);
-      
-      if (final && !isProcessing.current) {
-        isProcessing.current = true;
-        recognition.stop();
-        processSpeechRef.current(final);
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Storybook speech recognition error:', event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      if (!isProcessing.current) {
-          isProcessing.current = true;
-          setTranscript(prev => {
-              if (prev) processSpeechRef.current(prev);
-              return prev;
-          });
-      }
-    };
-  };
-
-  const handleDownload = () => {
-    if (!storyTitle || scenes.length < 5) return;
-
-    const storyHtml = `
-      <html>
-        <head>
-          <title>${storyTitle}</title>
-          <style>
-            body { font-family: 'Open Sans', sans-serif; margin: 0; }
-            @media print {
-              .page { page-break-after: always; }
-              @page { size: A4 landscape; margin: 1in; }
-            }
-            .page {
-              width: 100%;
-              height: 100vh;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: center;
-              padding: 40px;
-              box-sizing: border-box;
-            }
-            .title-page h1 { font-size: 3em; text-align: center; }
-            .title-page img { max-width: 60%; margin-top: 20px; border-radius: 15px; }
-            .story-page img { max-width: 90%; max-height: 55vh; object-fit: contain; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-            .story-page p { text-align: center; margin-top: 25px; font-size: 1.5em; max-width: 80%; line-height: 1.6; }
-          </style>
-        </head>
-        <body>
-          <div class="page title-page">
-            <h1>${storyTitle}</h1>
-            <img src="${scenes[0].imageUrl}" alt="Cover Image">
-          </div>
-          ${scenes.map((scene, index) => `
-            <div class="page story-page">
-              <img src="${scene.imageUrl}" alt="Scene ${index + 1}">
-              <p>${scene.text}</p>
-            </div>
-          `).join('')}
-        </body>
-      </html>
-    `;
-
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.open();
-      printWindow.document.write(storyHtml);
-      printWindow.document.close();
-      printWindow.onload = () => {
-        printWindow.focus();
-        printWindow.print();
-      };
+    } else {
+      speak(text, language);
     }
   };
 
-
-  if (isLoading && scenes.length === 0) {
+  if (isLoading) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center bg-purple-900 text-white p-8">
-        <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-yellow-300"></div>
-        <h2 className="text-3xl font-bold mt-8">นิทานของเรากำลังจะเริ่มขึ้น...</h2>
-        <p className="mt-2 text-lg">AI กำลังสร้างสรรค์การผจญภัยสำหรับคุณ!</p>
+      <div className="w-full h-full flex flex-col items-center justify-center bg-purple-100 text-purple-800 p-8">
+        <div className="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-purple-500 mb-6"></div>
+        <h2 className="text-2xl font-bold">{loadingMessage}</h2>
+        <p className="mt-2 text-lg">อดใจรอแป๊บนึงนะ!</p>
       </div>
     );
   }
-  
-  const areButtonsDisabled = isLoading || isAwaitingFeedback;
 
-  return (
-    <div className="w-full h-full flex flex-col bg-gray-100 overflow-y-auto">
-      <div className="w-full p-4 bg-white/80 backdrop-blur-sm shadow-md z-10 sticky top-0">
-        <p className="text-center text-sm font-semibold text-gray-600 mb-1">ฉากที่ {currentSceneIndex + 1} / 5</p>
-        <div className="w-full bg-gray-200 rounded-full h-4">
-          <div 
-            className="bg-gradient-to-r from-yellow-400 to-orange-500 h-4 rounded-full transition-all duration-700 ease-out" 
-            style={{ width: `${((currentSceneIndex + 1) / 5) * 100}%` }}
-          ></div>
+  if (isStoryFinished && currentScene) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-yellow-50 via-rose-50 to-sky-50 p-4 sm:p-8 overflow-y-auto">
+        <div className="w-full max-w-3xl bg-white/90 backdrop-blur-sm rounded-2xl shadow-2xl p-6 sm:p-8 space-y-4 animate-[bounce-in_0.5s_ease-out]">
+          <div ref={storyContainerRef} className="bg-purple-50 p-6 rounded-lg">
+              <h1 className="text-3xl sm:text-4xl font-['Lilita_One'] text-purple-700 text-center mb-4">{title}</h1>
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                {scenes.map((scene, index) => (
+                  <div key={index} className="flex flex-col sm:flex-row items-start gap-4 p-2">
+                    <img src={scene.imageUrl} alt={`Scene ${index + 1}`} className="w-full sm:w-48 h-auto rounded-lg shadow-md object-cover" />
+                    <p className="text-gray-700 whitespace-pre-line leading-relaxed flex-1">{scene.text}</p>
+                  </div>
+                ))}
+              </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+            <button onClick={handleDownload} className="flex items-center justify-center gap-2 px-6 py-3 bg-blue-500 text-white font-semibold rounded-xl shadow-lg hover:bg-blue-600 transition-colors">
+              <DownloadIcon />
+              <span>ดาวน์โหลดนิทาน</span>
+            </button>
+            <button onClick={onComplete} className="flex items-center justify-center gap-2 px-6 py-3 bg-green-500 text-white font-semibold rounded-xl shadow-lg hover:bg-green-600 transition-colors">
+              <span>เล่นอีกครั้ง</span>
+            </button>
+          </div>
         </div>
       </div>
-      
-      <main className="flex-1 flex flex-col p-4 gap-4">
-        <div className="w-full aspect-video bg-black rounded-lg overflow-hidden shadow-lg flex items-center justify-center">
-          {isLoading && !currentScene?.imageUrl ? (
-             <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-purple-500"></div>
-          ) : (
-            <img src={currentScene.imageUrl} alt="Story scene" className="w-full h-full object-cover"/>
-          )}
-        </div>
-        
-        <div className="w-full p-4 sm:p-6 flex flex-col gap-4 bg-white rounded-lg shadow-lg">
-          <div className="min-h-[6rem] relative">
-            {currentScene ? (
-              <>
-                <p className="text-lg md:text-xl text-gray-800 leading-relaxed pr-10">
-                  {displayedText}
-                  {displayedText.length < (currentScene.text?.length ?? 0) && (
-                      <span className="inline-block w-1 h-6 bg-gray-700 ml-1 animate-pulse align-bottom"></span>
-                  )}
-                </p>
-                 <button
-                    onClick={handleReplayOrStopAudio}
-                    disabled={isLoading || !currentScene?.text}
-                    className="absolute top-0 right-0 p-1 text-gray-500 hover:text-purple-600 disabled:text-gray-300 disabled:cursor-not-allowed transition-colors"
-                    aria-label={isSpeaking ? "หยุดเสียง" : "เล่นเสียงซ้ำ"}
-                    title={isSpeaking ? "หยุดเสียง" : "เล่นเสียงซ้ำ"}
-                  >
-                   {isSpeaking ? <SpeakerOffIcon /> : <SpeakerIcon />}
-                  </button>
-              </>
-            ) : <p>กำลังโหลดเนื้อเรื่อง...</p> }
+    );
+  }
+
+  if (currentScene) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-sky-100 via-pink-100 to-amber-100 p-4 sm:p-8 overflow-hidden">
+        <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-4 sm:gap-6 animate-[fade-in_0.5s_ease-out]">
+          <div className="w-full lg:w-1/2 aspect-video rounded-2xl shadow-2xl overflow-hidden relative">
+            <img src={currentScene.imageUrl} alt="Story illustration" className="w-full h-full object-cover" />
+            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-t from-black/50 to-transparent pointer-events-none"></div>
+            <button 
+              onClick={(e) => handleSpeakIconClick(e, currentScene.text)}
+              className="absolute top-4 right-4 p-3 bg-white/70 backdrop-blur-sm rounded-full text-purple-600 hover:bg-white transition-colors z-10"
+            >
+              {isSpeaking ? <SpeakerOffIcon /> : <SpeakerIcon />}
+            </button>
           </div>
           
-          <div>
-              {isLoading || isAwaitingFeedback ? (
-                  <div className="flex items-center justify-center space-x-2 h-28">
-                      <div className="w-4 h-4 rounded-full bg-purple-700 animate-pulse"></div>
-                      <div className="w-4 h-4 rounded-full bg-purple-700 animate-pulse [animation-delay:0.2s]"></div>
-                      <div className="w-4 h-4 rounded-full bg-purple-700 animate-pulse [animation-delay:0.4s]"></div>
-                      <p className="text-purple-700 ml-2">{isAwaitingFeedback ? 'กำลังประมวลผล...' : 'AI กำลังคิด...'}</p>
-                  </div>
-              ) : (
-                <div className="flex flex-col items-center gap-3">
-                  {currentScene?.choices && (
-                    <div className="w-full flex flex-col items-center gap-3">
-                      {currentScene.choices.map((choice, index) => (
-                        <button
-                          key={index}
-                          onClick={() => handleSpeakChoice(choice)}
-                          disabled={areButtonsDisabled || isListening || isSpeaking}
-                          className="w-full px-4 py-3 text-white font-bold text-base rounded-xl shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out bg-gradient-to-br from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 border-b-4 border-purple-700 active:border-b-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {choice}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {currentScene?.choices && recognitionRef.current && (
-                      <div className="w-full flex flex-col items-center gap-1 mt-3">
-                          <button onClick={isListening ? stopListening : startListening} disabled={areButtonsDisabled || isSpeaking} className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 ${isListening ? 'bg-red-500 animate-pulse scale-110' : 'bg-blue-500 hover:bg-blue-600'} text-white shadow-lg disabled:bg-gray-400`}>
-                              <div className="w-8 h-8">
-                                {isListening ? <StopIcon /> : <MicrophoneIcon />}
-                              </div>
-                          </button>
-                           <p className="text-lg font-semibold text-blue-600 min-h-[3rem] h-auto text-center px-2 flex items-center justify-center break-words">
-                              {transcript || (language === Language.TH ? 'หรือบอกไอเดียของน้องๆ มาได้เลย!' : 'Or, tell me your own idea!')}
-                           </p>
-                      </div>
-                  )}
-                  
-                  {scenes.length >= 5 && !currentScene?.choices && (
-                    <div className="w-full flex flex-col sm:flex-row items-center justify-center gap-4 mt-2">
-                      <button onClick={onComplete} disabled={areButtonsDisabled || isListening} className="w-full sm:w-auto px-8 py-4 text-white font-bold text-xl rounded-xl shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out bg-gradient-to-br from-green-500 to-teal-500 hover:from-green-600 hover:to-teal-600 border-b-4 border-green-700 active:border-b-2 disabled:opacity-50">
-                        เล่นอีกครั้ง!
-                      </button>
-                      <button onClick={handleDownload} disabled={areButtonsDisabled || isGeneratingTitle || !storyTitle} className="w-full sm:w-auto flex items-center justify-center gap-3 px-8 py-4 text-white font-bold text-xl rounded-xl shadow-lg transform hover:scale-105 transition-all duration-300 ease-in-out bg-gradient-to-br from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 border-b-4 border-blue-700 active:border-b-2 disabled:opacity-50">
-                        <DownloadIcon />
-                        <span>{isGeneratingTitle ? 'กำลังตั้งชื่อเรื่อง...' : 'บันทึกนิทาน'}</span>
-                      </button>
-                    </div>
-                  )}
+          <div className="w-full lg:w-1/2 flex flex-col justify-between bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-xl">
+            <div className="overflow-y-auto max-h-[200px] sm:max-h-[300px] pr-2">
+                <p className="text-gray-800 text-lg sm:text-xl leading-relaxed">{currentScene.text}</p>
+            </div>
+            
+            {currentScene.choices && currentScene.choices.length > 0 && (
+              <div className="mt-4">
+                <h2 className="text-xl font-bold text-purple-700 mb-3 flex items-center gap-2">
+                  <SparkleIcon />
+                  <span>จะเกิดอะไรขึ้นต่อไปดีนะ?</span>
+                </h2>
+                <div className="grid grid-cols-1 gap-3">
+                  {currentScene.choices.map((choice, index) => (
+                    <button
+                      key={index}
+                      onClick={() => handleChoice(choice)}
+                      className="w-full text-left p-4 bg-purple-100 text-purple-800 font-semibold rounded-lg hover:bg-purple-200 transition-colors shadow-sm"
+                    >
+                      {choice}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
+            )}
           </div>
         </div>
-      </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-full flex items-center justify-center">
+      <p>กำลังเตรียมเรื่องราว...</p>
     </div>
   );
 };

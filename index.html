@@ -56,6 +56,11 @@
         80% { transform: scale(1.05) translateY(0); opacity: 1; }
         100% { transform: scale(1) translateY(0); opacity: 1; }
       }
+      @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+        20%, 40%, 60%, 80% { transform: translateX(10px); }
+      }
     </style>
   <script type="importmap">
 {
@@ -66,7 +71,9 @@
     "react": "https://aistudiocdn.com/react@^19.1.1",
     "path": "https://aistudiocdn.com/path@^0.12.7",
     "vite": "https://aistudiocdn.com/vite@^7.1.5",
-    "url": "https://aistudiocdn.com/url@^0.11.4"
+    "url": "https://aistudiocdn.com/url@^0.11.4",
+    "html-to-image": "https://aistudiocdn.com/html-to-image@^1.11.13",
+    "downloadjs": "https://aistudiocdn.com/downloadjs@^1.4.7"
   }
 }
 </script>
