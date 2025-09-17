@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Word, PreloadedWord, Language } from '../types';
 import SpeakerIcon from './icons/SpeakerIcon';
-import SpeakerOffIcon from './icons/SpeakerOffIcon';
 import BadgeIcon from './icons/BadgeIcon';
 import MicrophoneIcon from './icons/MicrophoneIcon';
 import StopIcon from './icons/StopIcon';
@@ -36,6 +35,8 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [feedback, setFeedback] = useState<'correct' | 'incorrect' | 'thinking' | null>(null);
+  const [incorrectAttempts, setIncorrectAttempts] = useState(0);
+
 
   const recognitionRef = useRef(SpeechRecognition ? new SpeechRecognition() : null);
   const isProcessing = useRef(false);
@@ -51,6 +52,7 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
     setFeedback(null);
     setTranscript('');
     setShowEnglish(false);
+    setIncorrectAttempts(0);
     if (currentIndex < initialData.length - 1) {
       setCurrentIndex(currentIndex + 1);
     } else {
@@ -111,6 +113,7 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
         }, 1500);
       } else {
         setFeedback('incorrect');
+        setIncorrectAttempts(prev => prev + 1);
         speak("เอ๊ะ ไม่ใช่ ลองอีกครั้งนะ", Language.TH);
         feedbackTimeoutRef.current = setTimeout(() => {
           if (isMounted.current) {
@@ -209,6 +212,13 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
           </div>
         </header>
 
+         <div className="w-full flex flex-col gap-2">
+          <p className="text-sm font-semibold text-gray-600 text-center">{`คำที่ ${currentIndex + 1} / ${initialData.length}`}</p>
+          <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
+            <div className="bg-gradient-to-r from-yellow-400 to-orange-500 h-4 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercentage}%` }} />
+          </div>
+        </div>
+
         <div className={`relative w-full aspect-[4/3] cursor-pointer group transition-all duration-300 rounded-2xl ${feedback ? feedbackClasses[feedback] : ''}`} onClick={handleCardClick} style={{ perspective: '1000px' }}>
           <div className="relative w-full h-full rounded-2xl shadow-2xl transition-transform duration-700 ease-in-out" style={{ transformStyle: 'preserve-3d', transform: showEnglish ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
             <div className="absolute w-full h-full bg-white rounded-2xl overflow-hidden flex flex-col items-center justify-center p-4" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
@@ -216,9 +226,6 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
               <div className="absolute bottom-0 w-full bg-black/50 backdrop-blur-sm p-4 rounded-b-2xl">
                 <p className="text-4xl font-bold text-white text-center">{currentWord.word.thai}</p>
               </div>
-              <button onClick={handleSpeakIconClick} className="absolute top-4 right-4 p-3 bg-white/70 backdrop-blur-sm rounded-full text-purple-600 hover:bg-white transition-colors">
-                {isSpeaking ? <SpeakerOffIcon /> : <SpeakerIcon />}
-              </button>
             </div>
             <div className="absolute w-full h-full bg-purple-600 rounded-2xl overflow-hidden flex flex-col items-center justify-center p-4" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
               <p className="text-5xl font-bold text-white text-center">{currentWord.word.english}</p>
@@ -227,29 +234,43 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
         </div>
         
         <div className="flex flex-col items-center gap-2">
-            <button
-                onClick={isListening ? stopListening : startListening}
+            <div className="flex items-center justify-center gap-4">
+               <button
+                onClick={handleSpeakIconClick}
                 disabled={!!feedback}
-                className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 text-white shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed ${isListening ? 'bg-red-500 animate-pulse scale-110' : 'bg-blue-500 hover:bg-blue-600'}`}
-                aria-label={isListening ? 'หยุดฟัง' : 'เริ่มฟัง'}
-            >
-                <div className="w-10 h-10">
-                    {isListening ? <StopIcon /> : <MicrophoneIcon />}
-                </div>
-            </button>
+                className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 text-white shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed bg-purple-500 hover:bg-purple-600 ${isSpeaking ? 'bg-purple-700 animate-pulse' : ''}`}
+                aria-label="พูดซ้ำ"
+              >
+                <div className="w-10 h-10"><SpeakerIcon/></div>
+              </button>
+              <button
+                  onClick={isListening ? stopListening : startListening}
+                  disabled={!!feedback}
+                  className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 text-white shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed ${isListening ? 'bg-red-500 animate-pulse scale-110' : 'bg-blue-500 hover:bg-blue-600'}`}
+                  aria-label={isListening ? 'หยุดฟัง' : 'เริ่มฟัง'}
+              >
+                  <div className="w-10 h-10">
+                      {isListening ? <StopIcon /> : <MicrophoneIcon />}
+                  </div>
+              </button>
+            </div>
             <div className="min-h-[3rem] p-2 text-center text-gray-700 font-semibold text-lg">
                 <p>{transcript || "กดปุ่มแล้วพูดคำศัพท์ได้เลย!"}</p>
             </div>
-             <p className="text-center text-sm text-gray-500 -mt-2">✨ ลองพูดเป็นประโยค จะช่วยให้ AI จับคำได้ง่ายขึ้น!</p>
+            <div className="text-center space-y-1">
+              <p className="text-sm text-gray-500">✨ ลองพูดเป็นประโยค จะช่วยให้ AI จับคำได้ง่ายขึ้น!</p>
+              <p className="text-xs text-gray-400 h-4">
+                  {incorrectAttempts < 3 && "หากต้องการเปลี่ยนคำ น้องๆ ต้องลองตอบอย่างน้อย 3 ครั้งนะ"}
+              </p>
+            </div>
         </div>
 
-        <footer className="w-full flex flex-col items-center gap-4">
-          <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
-            <div className="bg-gradient-to-r from-yellow-400 to-orange-500 h-4 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercentage}%` }} />
-          </div>
-          <button onClick={handleNext} className="w-full px-8 py-4 font-['Lilita_One'] text-white text-3xl rounded-2xl shadow-lg transform transition-all duration-200 ease-in-out border-b-8 active:border-b-2 active:translate-y-1 bg-gradient-to-b from-green-500 to-teal-600 border-green-700 hover:from-green-400 hover:to-teal-500">
-            {isLastCard ? 'ไปแต่งนิทานกัน!' : 'ข้ามคำนี้'}
-          </button>
+        <footer className="w-full flex flex-col items-center gap-2 min-h-[100px] justify-center">
+            {incorrectAttempts >= 3 && (
+              <button onClick={handleNext} className="w-full px-8 py-4 font-['Lilita_One'] text-white text-3xl rounded-2xl shadow-lg transform transition-all duration-200 ease-in-out border-b-8 active:border-b-2 active:translate-y-1 bg-gradient-to-b from-green-500 to-teal-600 border-green-700 hover:from-green-400 hover:to-teal-500 animate-[bounce-in_0.5s_ease-out]">
+                {isLastCard ? 'ไปแต่งนิทานกัน!' : 'เปลี่ยนคำ'}
+              </button>
+            )}
         </footer>
       </div>
     </div>

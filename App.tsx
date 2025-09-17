@@ -21,6 +21,13 @@ const PreloadingScreen: React.FC<{ message: string }> = ({ message }) => (
     </div>
 );
 
+// Helper function to get random words from a category
+const getRandomWords = (category: WordCategory, count: number): Word[] => {
+  const allWords = VOCABULARY[category];
+  const shuffled = [...allWords].sort(() => 0.5 - Math.random());
+  return shuffled.slice(0, count);
+};
+
 
 function App() {
   // Game State
@@ -77,8 +84,9 @@ function App() {
   };
   
   const handleSkipToStory = () => {
-      setSelectedCategory(WordCategory.ANIMALS_NATURE);
-      const wordsToLearn = VOCABULARY[WordCategory.ANIMALS_NATURE].slice(0, MAX_WORDS_PER_ROUND);
+      const category = WordCategory.ANIMALS_NATURE;
+      setSelectedCategory(category);
+      const wordsToLearn = getRandomWords(category, MAX_WORDS_PER_ROUND);
       setLearnedWords(wordsToLearn);
       setGameState(GameState.STORY_TONE_SELECTION);
   };
@@ -87,10 +95,17 @@ function App() {
     if (gameState === GameState.PRELOADING_VOCAB && selectedCategory) {
       const preload = async () => {
         setLoadingMessage("AI กำลังเตรียมชุดคำศัพท์...");
-        const wordsToLearn = VOCABULARY[selectedCategory].slice(0, MAX_WORDS_PER_ROUND);
+        const wordsToLearn = getRandomWords(selectedCategory, MAX_WORDS_PER_ROUND);
         const preloadedData: PreloadedWord[] = [];
+        const isCancelled = { current: false };
+
+        // This allows us to stop preloading if the user navigates away
+        const cleanup = () => { isCancelled.current = true; };
+        window.addEventListener('beforeunload', cleanup);
+
 
         for (const word of wordsToLearn) {
+          if (isCancelled.current) break;
           // Update loading message for user feedback
           setLoadingMessage(`กำลังสร้างภาพสำหรับคำว่า '${word.thai}'...`);
           
@@ -98,16 +113,21 @@ function App() {
             ? await generateVocabImage(word.english)
             : `https://loremflickr.com/400/300/${word.english},illustration,simple?lock=${word.english.replace(/\s/g, '')}`;
           
+          if (isCancelled.current) break;
           preloadedData.push({ word, imageUrl });
           
           // Add a delay to avoid hitting the API rate limit for image generation
           if(isImageGenerationEnabled) {
-            await new Promise(resolve => setTimeout(resolve, 2000)); 
+            await new Promise(resolve => setTimeout(resolve, 5000)); 
           }
         }
+        
+        window.removeEventListener('beforeunload', cleanup);
 
-        setPreloadedWords(preloadedData);
-        setGameState(GameState.VOCAB_TRAINER);
+        if (!isCancelled.current) {
+            setPreloadedWords(preloadedData);
+            setGameState(GameState.VOCAB_TRAINER);
+        }
       };
       preload();
     }
