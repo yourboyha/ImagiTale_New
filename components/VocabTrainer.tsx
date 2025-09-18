@@ -30,7 +30,6 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
   isSpeaking,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showEnglish, setShowEnglish] = useState(false);
   const [words, setWords] = useState<Word[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -51,7 +50,6 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
     if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
     setFeedback(null);
     setTranscript('');
-    setShowEnglish(false);
     setIncorrectAttempts(0);
     if (currentIndex < initialData.length - 1) {
       setCurrentIndex(currentIndex + 1);
@@ -76,15 +74,6 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
     };
   }, [speak, stopSpeech]);
   
-  // Auto-speak the word when the card changes
-  useEffect(() => {
-    if (initialData.length > 0 && initialData[currentIndex]) {
-      speak(initialData[currentIndex].word.thai, Language.TH);
-    }
-    return () => {
-      stopSpeech();
-    };
-  }, [currentIndex, initialData, speak, stopSpeech]);
 
   useEffect(() => {
     if (recognitionRef.current) {
@@ -172,21 +161,6 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
     };
     recognition.start();
   }, [isListening, feedback, stopSpeech, processSpeech, transcript]);
-
-  const handleCardClick = () => {
-    if (!isListening && !feedback) {
-      setShowEnglish(prev => !prev);
-    }
-  };
-
-  const handleSpeakIconClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isSpeaking) {
-      stopSpeech();
-    } else if (initialData[currentIndex]) {
-      speak(initialData[currentIndex].word.thai, Language.TH);
-    }
-  };
   
   if (initialData.length === 0) return <div className="w-full h-full flex items-center justify-center bg-gray-100"><p className="text-xl text-gray-600">กำลังเตรียมคำศัพท์...</p></div>;
   
@@ -219,40 +193,45 @@ const VocabTrainer: React.FC<VocabTrainerProps> = ({
           </div>
         </div>
 
-        <div className={`relative w-full aspect-[4/3] cursor-pointer group transition-all duration-300 rounded-2xl ${feedback ? feedbackClasses[feedback] : ''}`} onClick={handleCardClick} style={{ perspective: '1000px' }}>
-          <div className="relative w-full h-full rounded-2xl shadow-2xl transition-transform duration-700 ease-in-out" style={{ transformStyle: 'preserve-3d', transform: showEnglish ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
-            <div className="absolute w-full h-full bg-white rounded-2xl overflow-hidden flex flex-col items-center justify-center p-4" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
-              <img src={currentWord.imageUrl} alt={currentWord.word.english} className="w-full h-full object-contain" />
-              <div className="absolute bottom-0 w-full bg-black/50 backdrop-blur-sm p-4 rounded-b-2xl">
-                <p className="text-4xl font-bold text-white text-center">{currentWord.word.thai}</p>
-              </div>
-            </div>
-            <div className="absolute w-full h-full bg-purple-600 rounded-2xl overflow-hidden flex flex-col items-center justify-center p-4" style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
-              <p className="text-5xl font-bold text-white text-center">{currentWord.word.english}</p>
-            </div>
+        <div className={`relative w-full aspect-[4/3] transition-all duration-300 rounded-2xl shadow-2xl bg-white overflow-hidden ${feedback ? feedbackClasses[feedback] : ''}`}>
+          <img src={currentWord.imageUrl} alt={currentWord.word.english} className="w-full h-full object-contain" />
+          <div className="absolute bottom-0 w-full bg-black/50 backdrop-blur-sm p-4 rounded-b-2xl">
+            <p className="text-2xl sm:text-3xl font-bold text-white text-center">
+              {currentWord.word.thai} : {currentWord.word.english}
+            </p>
           </div>
         </div>
         
         <div className="flex flex-col items-center gap-2">
-            <div className="flex items-center justify-center gap-4">
-               <button
-                onClick={handleSpeakIconClick}
+            <button
+                onClick={isListening ? stopListening : startListening}
                 disabled={!!feedback}
-                className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 text-white shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed bg-purple-500 hover:bg-purple-600 ${isSpeaking ? 'bg-purple-700 animate-pulse' : ''}`}
-                aria-label="พูดซ้ำ"
-              >
-                <div className="w-10 h-10"><SpeakerIcon/></div>
-              </button>
-              <button
-                  onClick={isListening ? stopListening : startListening}
-                  disabled={!!feedback}
-                  className={`w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 text-white shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed ${isListening ? 'bg-red-500 animate-pulse scale-110' : 'bg-blue-500 hover:bg-blue-600'}`}
-                  aria-label={isListening ? 'หยุดฟัง' : 'เริ่มฟัง'}
-              >
-                  <div className="w-10 h-10">
-                      {isListening ? <StopIcon /> : <MicrophoneIcon />}
-                  </div>
-              </button>
+                className={`w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 text-white shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed ${isListening ? 'bg-red-500 animate-pulse scale-110' : 'bg-blue-500 hover:bg-blue-600'}`}
+                aria-label={isListening ? 'หยุดฟัง' : 'เริ่มฟัง'}
+            >
+                <div className="w-12 h-12">
+                    {isListening ? <StopIcon /> : <MicrophoneIcon />}
+                </div>
+            </button>
+            <div className="flex items-center justify-center gap-4 mt-2">
+                 <button
+                    onClick={() => speak(currentWord.word.thai, Language.TH)}
+                    disabled={!!feedback || isSpeaking}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500 text-white font-semibold shadow-md hover:bg-purple-600 disabled:bg-gray-400 transition-colors"
+                    aria-label="ฟังภาษาไทย"
+                  >
+                    <SpeakerIcon />
+                    <span>ฟัง (ไทย)</span>
+                  </button>
+                  <button
+                    onClick={() => speak(currentWord.word.english, Language.EN)}
+                    disabled={!!feedback || isSpeaking}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-sky-500 text-white font-semibold shadow-md hover:bg-sky-600 disabled:bg-gray-400 transition-colors"
+                    aria-label="ฟังภาษาอังกฤษ"
+                  >
+                    <SpeakerIcon />
+                    <span>Listen (EN)</span>
+                  </button>
             </div>
             <div className="min-h-[3rem] p-2 text-center text-gray-700 font-semibold text-lg">
                 <p>{transcript || "กดปุ่มแล้วพูดคำศัพท์ได้เลย!"}</p>

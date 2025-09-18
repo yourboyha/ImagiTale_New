@@ -99,27 +99,39 @@ function App() {
         const preloadedData: PreloadedWord[] = [];
         const isCancelled = { current: false };
 
-        // This allows us to stop preloading if the user navigates away
         const cleanup = () => { isCancelled.current = true; };
         window.addEventListener('beforeunload', cleanup);
 
+        let localImageGenerationEnabled = isImageGenerationEnabled;
 
         for (const word of wordsToLearn) {
           if (isCancelled.current) break;
-          // Update loading message for user feedback
           setLoadingMessage(`กำลังสร้างภาพสำหรับคำว่า '${word.thai}'...`);
           
-          const imageUrl = isImageGenerationEnabled 
-            ? await generateVocabImage(word.english)
-            : `https://loremflickr.com/400/300/${word.english},illustration,simple?lock=${word.english.replace(/\s/g, '')}`;
+          let imageUrl;
+
+          if (localImageGenerationEnabled) {
+              const result = await generateVocabImage(word.english);
+              imageUrl = result.imageUrl;
+
+              if (result.success) {
+                  // Add a delay only on success to avoid hitting API rate limits
+                  await new Promise(resolve => setTimeout(resolve, 5000));
+              } else if (result.error) {
+                  const errorMessage = result.error?.message || '';
+                  if (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
+                      console.warn("Quota error detected. Disabling AI image generation for this session.");
+                      localImageGenerationEnabled = false;
+                      setIsImageGenerationEnabled(false); // For next game rounds
+                  }
+              }
+          } else {
+            // Generation is disabled (either from settings or from a previous failure)
+            imageUrl = `https://loremflickr.com/400/300/${word.english},illustration,simple?lock=${word.english.replace(/\s/g, '')}`;
+          }
           
           if (isCancelled.current) break;
           preloadedData.push({ word, imageUrl });
-          
-          // Add a delay to avoid hitting the API rate limit for image generation
-          if(isImageGenerationEnabled) {
-            await new Promise(resolve => setTimeout(resolve, 5000)); 
-          }
         }
         
         window.removeEventListener('beforeunload', cleanup);
@@ -185,7 +197,7 @@ function App() {
           isSpeaking={isSpeaking}
         />;
       case GameState.STORY_TONE_SELECTION:
-          return <StoryToneSelection onToneSelected={handleToneSelected} />;
+          return <StoryToneSelection onToneSelected={handleToneSelected} speak={speak} />;
       case GameState.STORY:
         if (!storyTone || learnedWords.length === 0) {
             handleGoHome();
