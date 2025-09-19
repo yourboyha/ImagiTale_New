@@ -11,15 +11,8 @@ import Storybook from './components/Storybook';
 import SettingsIcon from './components/icons/SettingsIcon';
 import HomeIcon from './components/icons/HomeIcon';
 import SettingsModal from './components/SettingsModal';
+import PreloadingScreen from './components/PreloadingScreen';
 
-// A simple preloading screen component
-const PreloadingScreen: React.FC<{ message: string }> = ({ message }) => (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-purple-100 text-purple-800 p-8">
-        <div className="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-purple-500 mb-6"></div>
-        <h2 className="text-2xl font-bold">{message}</h2>
-        <p className="mt-2 text-lg">เตรียมความพร้อมสักครู่นะ!</p>
-    </div>
-);
 
 // Helper function to get random words from a category
 const getRandomWords = (category: WordCategory, count: number): Word[] => {
@@ -33,8 +26,7 @@ function App() {
   // Game State
   const [gameState, setGameState] = useState<GameState>(GameState.HOME);
   const [language] = useState<Language>(Language.TH);
-  const [loadingMessage, setLoadingMessage] = useState("กำลังสร้างภาพคำศัพท์ด้วย AI...");
-
+  
   // Data for Story
   const [selectedCategory, setSelectedCategory] = useState<WordCategory | null>(null);
   const [preloadedWords, setPreloadedWords] = useState<PreloadedWord[]>([]);
@@ -94,52 +86,28 @@ function App() {
   useEffect(() => {
     if (gameState === GameState.PRELOADING_VOCAB && selectedCategory) {
       const preload = async () => {
-        setLoadingMessage("AI กำลังเตรียมชุดคำศัพท์...");
         const wordsToLearn = getRandomWords(selectedCategory, MAX_WORDS_PER_ROUND);
-        const preloadedData: PreloadedWord[] = [];
-        const isCancelled = { current: false };
-
-        const cleanup = () => { isCancelled.current = true; };
-        window.addEventListener('beforeunload', cleanup);
-
-        let localImageGenerationEnabled = isImageGenerationEnabled;
-
-        for (const word of wordsToLearn) {
-          if (isCancelled.current) break;
-          setLoadingMessage(`กำลังสร้างภาพสำหรับคำว่า '${word.thai}'...`);
-          
-          let imageUrl;
-
-          if (localImageGenerationEnabled) {
-              const result = await generateVocabImage(word.english);
-              imageUrl = result.imageUrl;
-
-              if (result.success) {
-                  // Add a delay only on success to avoid hitting API rate limits
-                  await new Promise(resolve => setTimeout(resolve, 5000));
-              } else if (result.error) {
-                  const errorMessage = result.error?.message || '';
-                  if (errorMessage.includes('429') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
-                      console.warn("Quota error detected. Disabling AI image generation for this session.");
-                      localImageGenerationEnabled = false;
-                      setIsImageGenerationEnabled(false); // For next game rounds
-                  }
-              }
-          } else {
-            // Generation is disabled (either from settings or from a previous failure)
-            imageUrl = `https://loremflickr.com/400/300/${word.english},illustration,simple?lock=${word.english.replace(/\s/g, '')}`;
-          }
-          
-          if (isCancelled.current) break;
-          preloadedData.push({ word, imageUrl });
-        }
         
-        window.removeEventListener('beforeunload', cleanup);
+        // Use Promise.all to fetch all images in parallel for massive speed-up.
+        const imagePromises = wordsToLearn.map(word => 
+          generateVocabImage(word.english, isImageGenerationEnabled)
+        );
 
-        if (!isCancelled.current) {
-            setPreloadedWords(preloadedData);
-            setGameState(GameState.VOCAB_TRAINER);
+        const imageResults = await Promise.all(imagePromises);
+
+        // Check if any requests failed due to quota and disable for next time if so.
+        if (imageResults.some(r => !r.success && r.error?.message.includes('RESOURCE_EXHAUSTED'))) {
+           console.warn("Quota error detected. Disabling AI image generation for this session.");
+           setIsImageGenerationEnabled(false);
         }
+
+        const preloadedData = wordsToLearn.map((word, index) => ({
+          word,
+          imageUrl: imageResults[index].imageUrl,
+        }));
+
+        setPreloadedWords(preloadedData);
+        setGameState(GameState.VOCAB_TRAINER);
       };
       preload();
     }
@@ -183,7 +151,7 @@ function App() {
           speak={speak}
         />;
       case GameState.PRELOADING_VOCAB:
-          return <PreloadingScreen message={loadingMessage} />;
+          return <PreloadingScreen />;
       case GameState.VOCAB_TRAINER:
         return <VocabTrainer
           onComplete={handleVocabComplete}
@@ -212,6 +180,7 @@ function App() {
           speak={speak}
           stopSpeech={stopSpeech}
           isSpeaking={isSpeaking}
+          onSettingsClick={() => setIsSettingsOpen(true)}
         />;
       default:
         return <HomeScreen onStart={handleStart} />;
@@ -226,7 +195,7 @@ function App() {
       
       {/* UI Controls */}
       <div className="absolute top-4 right-4 z-40 flex gap-2">
-        {gameState !== GameState.HOME && (
+        {gameState !== GameState.HOME && gameState !== GameState.STORY && (
           <button 
             onClick={handleGoHome}
             className="p-3 bg-white/80 backdrop-blur-sm rounded-full text-purple-600 hover:bg-white transition-colors shadow-md"
@@ -235,13 +204,15 @@ function App() {
             <HomeIcon />
           </button>
         )}
-        <button 
-          onClick={() => setIsSettingsOpen(true)}
-          className="p-3 bg-white/80 backdrop-blur-sm rounded-full text-purple-600 hover:bg-white transition-colors shadow-md"
-          aria-label="Open settings"
-        >
-          <SettingsIcon />
-        </button>
+        { gameState !== GameState.STORY && (
+          <button 
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-3 bg-white/80 backdrop-blur-sm rounded-full text-purple-600 hover:bg-white transition-colors shadow-md"
+            aria-label="Open settings"
+          >
+            <SettingsIcon />
+          </button>
+        )}
       </div>
       
       <SettingsModal

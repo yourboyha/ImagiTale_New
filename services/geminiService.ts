@@ -18,7 +18,7 @@ const choiceSceneSchema = {
         ...sceneSchema.properties,
         choices: {
             type: Type.ARRAY,
-            description: "Three short, creative choices for the child to pick from to continue the story.",
+            description: "Three short, creative choices for the child to see as hints or inspiration. The child will use their voice to tell the next part of the story.",
             items: { type: Type.STRING }
         },
     },
@@ -62,7 +62,13 @@ async function callTextAPI(prompt: string, schema: any) {
 }
 
 
-export async function generateVocabImage(word: string): Promise<{imageUrl: string, success: boolean, error?: any}> {
+export async function generateVocabImage(word: string, isEnabled: boolean): Promise<{imageUrl: string, success: boolean, error?: any}> {
+    const fallbackUrl = `https://loremflickr.com/400/300/${word},illustration,simple?lock=${word.replace(/\s/g, '')}`;
+    
+    if (!isEnabled) {
+        return { imageUrl: fallbackUrl, success: true }; // Success is true because we intentionally skipped.
+    }
+
     try {
         const response = await ai.models.generateImages({
             model: 'imagen-4.0-generate-001',
@@ -78,7 +84,7 @@ export async function generateVocabImage(word: string): Promise<{imageUrl: strin
     } catch (error) {
         console.error(`Image generation for ${word} failed:`, error);
         return { 
-            imageUrl: `https://loremflickr.com/400/300/${word},illustration,simple?lock=${word.replace(/\s/g, '')}`,
+            imageUrl: fallbackUrl,
             success: false,
             error: error
         };
@@ -96,8 +102,8 @@ export async function generateInitialStoryScene(words: string[], language: Langu
     const systemInstruction = getSystemInstruction(language, storyTone);
     const prompt = `${systemInstruction}
     Start a story that includes some of these words: ${words.join(', ')}.
-    This is the first scene (introduction). The story scene should be one paragraph, between 3 to 5 sentences long, and end with an engaging question for the child.
-    Generate three short, creative choices for the child to pick from to continue the story.`;
+    This is Scene 1: The Introduction. Introduce the characters and setting. The story scene should be one paragraph, between 3 to 5 sentences long, and end with an engaging question for the child.
+    Generate three short, creative choices for the child to see as hints or inspiration.`;
 
     const data = await callTextAPI(prompt, choiceSceneSchema);
     if (!data) return { text: "เกิดข้อผิดพลาดในการสร้างเรื่องราว", imageUrl: "", choices: ["ลองอีกครั้ง"] };
@@ -113,9 +119,9 @@ export async function generateNextStoryScene(storySoFar: string, userChoice: str
     const systemInstruction = getSystemInstruction(language, storyTone);
     
     const sceneDescriptions: { [key: number]: string } = {
-        2: 'This is the second scene (the adventure begins).',
-        3: 'This is the third scene (an obstacle appears).',
-        4: 'This is the fourth scene (the characters find a solution).',
+        2: 'This is Scene 2: The Adventure Begins. The characters start their journey or activity.',
+        3: 'This is Scene 3: The Obstacle. A problem or challenge appears.',
+        4: 'This is Scene 4: The Solution. The characters find a way to solve the problem.',
     };
     const sceneDescription = sceneDescriptions[sceneIndex] || 'Continue the story.';
 
@@ -125,7 +131,7 @@ export async function generateNextStoryScene(storySoFar: string, userChoice: str
     ${sceneDescription}
     Try to include some of these words if they fit: ${allWords.join(', ')}.
     The new paragraph must be very short (3-5 sentences) and end with an engaging question for the child.
-    Generate three short, creative choices for the child to pick from to continue the story.`;
+    Generate three short, creative choices for the child to see as hints or inspiration for their next voice input.`;
 
     const data = await callTextAPI(prompt, choiceSceneSchema);
     if (!data) return { text: "AI กำลังคิดเรื่องราวต่อ... แต่เกิดข้อผิดพลาด", imageUrl: "", choices: ["ลองอีกครั้ง"] };
@@ -140,7 +146,7 @@ export async function generateNextStoryScene(storySoFar: string, userChoice: str
 export async function generateFinalStoryScene(storySoFar: string, language: Language, storyTone: StoryTone, allWords: string[], isImageGenerationEnabled: boolean): Promise<StoryScene> {
     const systemInstruction = getSystemInstruction(language, storyTone);
     const prompt = `${systemInstruction}
-    Write a warm and satisfying conclusion for this story: "${storySoFar}". This is the fifth and final scene (the happy ending and moral).
+    Write a warm and satisfying conclusion for this story: "${storySoFar}". This is the fifth and final scene: The Happy Ending & Moral.
     The conclusion must be very short, between 3 to 5 sentences.
     Incorporate any remaining words from this list if possible: ${allWords.join(', ')}.`;
 
