@@ -43,7 +43,36 @@ function App() {
 
   // Speech Synthesis
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [femaleVoice, setFemaleVoice] = useState<SpeechSynthesisVoice | null>(null);
   const synth = window.speechSynthesis;
+
+  useEffect(() => {
+    const setVoice = () => {
+      if (!synth) return;
+      const voices = synth.getVoices();
+      if (voices.length > 0) {
+        // Heuristics to find a female Thai voice. Names vary across platforms.
+        // 'Kanya' is common on Apple devices. 'Chulada' on Windows. Others might just say 'female'.
+        const preferredVoice = voices.find(voice =>
+          voice.lang === Language.TH &&
+          (voice.name.toLowerCase().includes('female') || voice.name.toLowerCase().includes('kanya') || voice.name.toLowerCase().includes('chulada'))
+        );
+        // If no preferred voice is found, fall back to the first available Thai voice.
+        const fallbackVoice = voices.find(voice => voice.lang === Language.TH);
+        setFemaleVoice(preferredVoice || fallbackVoice || null);
+      }
+    };
+    // Voices are loaded asynchronously, so we need to listen for the 'voiceschanged' event.
+    synth.onvoiceschanged = setVoice;
+    // Call it once in case voices are already loaded (e.g., on some browsers).
+    setVoice();
+    return () => {
+      if (synth) {
+        synth.onvoiceschanged = null;
+      }
+    };
+  }, [synth]);
+
 
   const speak = useCallback((text: string, lang: Language = language) => {
     if (!synth) return;
@@ -52,11 +81,17 @@ function App() {
     utterance.lang = lang;
     utterance.pitch = 1;
     utterance.rate = 1;
+
+    // Use the selected female voice if available and the language is Thai
+    if (femaleVoice && lang === Language.TH) {
+      utterance.voice = femaleVoice;
+    }
+
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
     synth.speak(utterance);
-  }, [synth, language]);
+  }, [synth, language, femaleVoice]);
 
   const stopSpeech = useCallback(() => {
     if (!synth) return;
